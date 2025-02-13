@@ -1,10 +1,6 @@
 import dns from 'node:dns'
 import { snakeCase } from 'snake-case'
-import {
-  ProxyAgent,
-  request,
-  setGlobalDispatcher,
-} from 'undici'
+import { request, setGlobalDispatcher, errors, Dispatcher } from 'undici'
 
 import { version } from '../../package.json'
 import {
@@ -13,9 +9,17 @@ import {
   PostResults,
   PutResults,
   UploaderArgs,
+  UploaderEnvs,
   UploaderInputs,
 } from '../types'
-import { info } from './logger'
+import { UploadLogger, info, logError } from './logger'
+import { addProxyIfNeeded } from './proxy'
+import { sleep } from './util'
+
+
+const maxRetries = 4
+const baseBackoffDelayMs = 1000 // Adjust this value based on your needs.
+export const userAgent = `codecov-uploader/${version}`
 
 /**
  *
@@ -28,11 +32,11 @@ export function populateBuildParams(
   inputs: UploaderInputs,
   serviceParams: Partial<IServiceParams>,
 ): Partial<IServiceParams> {
-  const { args, environment: envs } = inputs
+  const { args, envs } = inputs
   serviceParams.name = args.name || envs.CODECOV_NAME || ''
   serviceParams.tag = args.tag || ''
 
-  if (typeof args.flags === "string") {
+  if (typeof args.flags === 'string') {
     serviceParams.flags = args.flags
   } else {
     serviceParams.flags = args.flags.join(',')
@@ -50,24 +54,56 @@ export function getPackage(source: string): string {
   }
 }
 
+async function requestWithRetry(
+  url: string,
+  options: Dispatcher.RequestOptions,
+  retryCount = 0,
+): Promise<Dispatcher.ResponseData> {
+  try {
+    const response = await request(url, options)
+    return response
+  } catch (error: unknown) {
+    if (
+      (
+        (error instanceof errors.UndiciError && error.code == 'ECONNRESET') ||
+        (error instanceof errors.UndiciError && error.code == 'ETIMEDOUT') ||
+        (error instanceof errors.UndiciError && error.code == 'UND_ERR_RESPONSE_STATUS_CODE') ||
+        error instanceof errors.ConnectTimeoutError ||
+        error instanceof errors.SocketError
+      ) && retryCount < maxRetries
+    ) {
+      const backoffDelay = baseBackoffDelayMs * 2 ** retryCount
+      await sleep(backoffDelay)
+      UploadLogger.verbose('Request to Codecov failed. Retrying...')
+      logError(`Request error: ${error.message}`)
+      return requestWithRetry(url, options, retryCount + 1)
+    }
+    throw error
+  }
+}
 
 export async function uploadToCodecovPUT(
   putAndResultUrlPair: PostResults,
   uploadFile: string | Buffer,
-  args: UploaderArgs
+  envs: UploaderEnvs,
+  args: UploaderArgs,
 ): Promise<PutResults> {
   info('Uploading...')
 
   const requestHeaders = generateRequestHeadersPUT(
     putAndResultUrlPair.putURL,
     uploadFile,
+    envs,
     args,
   )
   if (requestHeaders.agent) {
     setGlobalDispatcher(requestHeaders.agent)
   }
-  dns.setDefaultResultOrder('ipv4first');
-  const response = await request(requestHeaders.url.origin, requestHeaders.options)
+  dns.setDefaultResultOrder('ipv4first')
+  const response = await requestWithRetry(
+    requestHeaders.url.origin,
+    requestHeaders.options,
+  )
 
   if (response.statusCode !== 200) {
     const data = await response.body.text()
@@ -76,7 +112,7 @@ export async function uploadToCodecovPUT(
     )
   }
 
-  return { status: 'success', resultURL: putAndResultUrlPair.resultURL }
+  return { status: 'processing', resultURL: putAndResultUrlPair.resultURL }
 }
 
 export async function uploadToCodecovPOST(
@@ -84,6 +120,7 @@ export async function uploadToCodecovPOST(
   token: string,
   query: string,
   source: string,
+  envs: UploaderEnvs,
   args: UploaderArgs,
 ): Promise<string> {
   const requestHeaders = generateRequestHeadersPOST(
@@ -91,13 +128,18 @@ export async function uploadToCodecovPOST(
     token,
     query,
     source,
+    envs,
     args,
   )
   if (requestHeaders.agent) {
     setGlobalDispatcher(requestHeaders.agent)
   }
-  dns.setDefaultResultOrder('ipv4first');
-  const response = await request(requestHeaders.url.origin, requestHeaders.options)
+  dns.setDefaultResultOrder('ipv4first')
+
+  const response = await requestWithRetry(
+    requestHeaders.url.origin,
+    requestHeaders.options,
+  )
 
   if (response.statusCode !== 200) {
     const data = await response.body.text()
@@ -108,7 +150,6 @@ export async function uploadToCodecovPOST(
 
   return await response.body.text()
 }
-
 /**
  *
  * @param {Object} queryParams
@@ -120,8 +161,6 @@ export function generateQuery(queryParams: Partial<IServiceParams>): string {
   ).toString()
 }
 
-
-
 export function parsePOSTResults(putAndResultUrlPair: string): PostResults {
   info(putAndResultUrlPair)
 
@@ -131,7 +170,9 @@ export function parsePOSTResults(putAndResultUrlPair: string): PostResults {
   const matches = putAndResultUrlPair.match(re)
 
   if (matches === null) {
-    throw new Error(`Parsing results from POST failed: (${putAndResultUrlPair})`)
+    throw new Error(
+      `Parsing results from POST failed: (${putAndResultUrlPair})`,
+    )
   }
 
   if (matches?.length !== 2) {
@@ -142,12 +183,12 @@ export function parsePOSTResults(putAndResultUrlPair: string): PostResults {
 
   if (matches[0] === undefined || matches[1] === undefined) {
     throw new Error(
-      `Invalid URLs received when parsing results from POST: ${matches[0]},${matches[1]}`
+      `Invalid URLs received when parsing results from POST: ${matches[0]},${matches[1]}`,
     )
   }
   const resultURL = new URL(matches[0].trimEnd())
   const putURL = new URL(matches[1])
-   // This match may have trailing 0x0A and 0x0D that must be trimmed
+  // This match may have trailing 0x0A and 0x0D that must be trimmed
 
   return { putURL, resultURL }
 }
@@ -162,20 +203,25 @@ export function generateRequestHeadersPOST(
   token: string,
   query: string,
   source: string,
+  envs: UploaderEnvs,
   args: UploaderArgs,
 ): IRequestHeaders {
-  const url = new URL(`upload/v4?package=${getPackage(
-    source,
-  )}&token=${token}&${query}`, postURL)
+  const url = new URL(
+    `upload/v4?package=${getPackage(source)}&token=${token}&${query}`,
+    postURL,
+  )
+
+  const headers: Record<string, string> = {
+    'X-Upload-Token': token,
+    'X-Reduced-Redundancy': 'false',
+    'User-Agent': userAgent,
+  }
 
   return {
-    agent: args.upstream ? new ProxyAgent(args.upstream) : undefined,
+    agent: addProxyIfNeeded(envs, args),
     url: url,
     options: {
-      headers: {
-        'X-Upload-Token': token,
-        'X-Reduced-Redundancy': 'false',
-      },
+      headers,
       method: 'POST',
       origin: postURL,
       path: `${url.pathname}${url.search}`,
@@ -186,17 +232,21 @@ export function generateRequestHeadersPOST(
 export function generateRequestHeadersPUT(
   uploadURL: URL,
   uploadFile: string | Buffer,
+  envs: UploaderEnvs,
   args: UploaderArgs,
 ): IRequestHeaders {
+  const headers: Record<string, string> = {
+    'Content-Type': 'text/plain',
+    'Content-Encoding': 'gzip',
+    'User-Agent': userAgent,
+  }
+
   return {
-    agent: args.upstream ? new ProxyAgent(args.upstream) : undefined,
+    agent: addProxyIfNeeded(envs, args),
     url: uploadURL,
     options: {
       body: uploadFile,
-      headers: {
-        'Content-Type': 'text/plain',
-        'Content-Encoding': 'gzip',
-      },
+      headers,
       method: 'PUT',
       origin: uploadURL,
       path: `${uploadURL.pathname}${uploadURL.search}`,

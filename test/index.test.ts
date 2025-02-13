@@ -14,7 +14,7 @@ import { version } from '../package.json'
 import { UploadLogger } from '../src/helpers/logger'
 import * as providerHelpers from '../src/helpers/provider'
 import * as webHelpers from '../src/helpers/web'
-import { IServiceParams } from '../src/types'
+import { IServiceParams, UploaderArgs, } from '../src/types'
 
 // Backup the env
 const realEnv = { ...process.env }
@@ -78,7 +78,7 @@ describe('Uploader Core', () => {
       upstream: '',
       url: 'https://codecov.io',
     }
-    const inputs = { args, environment: process.env }
+    const inputs = { args, envs: process.env }
     const serviceParams = await providerHelpers.detectProvider(inputs, args.token != '')
     const buildParams = webHelpers.populateBuildParams(inputs, serviceParams)
     const query = webHelpers.generateQuery(buildParams)
@@ -92,11 +92,11 @@ describe('Uploader Core', () => {
     mockClient.intercept({
       method: 'PUT',
       path: '/',
-    }).reply(200, 'success')
+    }).reply(200, 'processing')
 
     const result = await app.main(args)
     expect(result).toEqual({
-      status: 'success',
+      status: 'processing',
       resultURL: 'https://results.codecov.io/',
     })
   }, 30000)
@@ -164,17 +164,19 @@ describe('Uploader Core', () => {
       })
 
       const detectProvider = td.replace(providerHelpers, 'detectProvider')
-      const buildParams: Partial<IServiceParams> = {
-        branch: '',
-        build: '',
-        buildURL: '',
-        commit: 'testSHA',
-        job: '',
-        pr: '',
-        service: 'no service',
-        slug: '',
+      async function buildParams(): Promise<Partial<IServiceParams>> {
+        return await {
+          branch: '',
+          build: '',
+          buildURL: '',
+          commit: 'testSHA',
+          job: '',
+          pr: '',
+          service: 'no service',
+          slug: '',
+        }
       }
-      td.when(detectProvider(td.matchers.anything(), false)).thenReturn(buildParams)
+      td.when(detectProvider(td.matchers.anything(), false)).thenReturn(buildParams())
 
       await expect(f()).rejects.toThrow(
         'Slug must be set if a token is not passed',
@@ -196,7 +198,7 @@ describe('Uploader Core', () => {
         slug: '',
         upstream: ''
       }
-      const inputs = { args, environment: process.env }
+      const inputs = { args, envs: process.env }
       const serviceParams = await providerHelpers.detectProvider(inputs, args.token != '')
       const buildParams = webHelpers.populateBuildParams(inputs, serviceParams)
       const query = webHelpers.generateQuery(buildParams)
@@ -210,11 +212,11 @@ describe('Uploader Core', () => {
       mockClient.intercept({
         method: 'PUT',
         path: '/',
-      }).reply(200, 'success')
+      }).reply(200, 'processing')
 
       const result = await app.main(args)
       expect(result).toEqual({
-        status: 'success',
+        status: 'processing',
         resultURL: 'https://results.codecov.io/',
       })
     }, 30000)
@@ -225,7 +227,7 @@ describe('Uploader Core', () => {
     process.env.CIRCLECI = 'true'
 
     const parent = '2x4bqz123abc'
-    const args = {
+    const args: UploaderArgs = {
       token: 'abcdefg',
       url: 'https://codecov.io',
       parent,
@@ -233,7 +235,7 @@ describe('Uploader Core', () => {
       slug: '',
       upstream: ''
     }
-    const inputs = { args, environment: process.env }
+    const inputs = { args, envs: process.env }
     const serviceParams = await providerHelpers.detectProvider(inputs, args.token != '')
     const buildParams = webHelpers.populateBuildParams(inputs, serviceParams)
     const query = webHelpers.generateQuery(buildParams)
@@ -247,11 +249,11 @@ describe('Uploader Core', () => {
     mockClient.intercept({
       method: 'PUT',
       path: '/',
-    }).reply(200, 'success')
+    }).reply(200, 'processing')
 
     const result = await app.main(args)
     expect(result).toEqual({
-      status: 'success',
+      status: 'processing',
       resultURL: 'https://results.codecov.io/',
     })
   }, 30000)

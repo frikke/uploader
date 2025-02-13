@@ -1,6 +1,6 @@
 export interface ICLIArgument {
   name: string
-  alias: string
+  alias?: string
   type?: string
   default?: string | boolean
   description: string
@@ -58,7 +58,11 @@ const args: ICLIArgument[] = [
     description: 'Target file(s) to upload',
   },
   {
-    alias: 'full',
+    name: 'preventSymbolicLinks',
+    type: 'boolean',
+    description: 'Specifies whether to prevent following of symbolic links. Defaults to false (symbolic links are followed).'
+  },
+  {
     name: 'fullReport',
     type: 'string',
     description: 'Specify the path to a previously uploaded Codecov report'
@@ -185,6 +189,13 @@ const args: ICLIArgument[] = [
     type: 'string',
     description: 'Change the upload host (Enterprise use)',
     default: 'https://codecov.io',
+  },
+  {
+    alias: 'uc',
+    name: 'useCwd',
+    type: 'boolean',
+    default: false,
+    description: 'Use the current working directory instead of the git root',
   },
   {
     alias: 'v',

@@ -15,7 +15,7 @@ describe('Local Params', () => {
     it('does not run with git not installed', () => {
       const spawnSync = td.replace(childProcess, 'spawnSync')
       td.when(spawnSync('git')).thenReturn({
-        error: 'Git is not installed!',
+        error: new Error('Git is not installed!'),
       })
       const detected = providerLocal.detect()
       expect(detected).toBeFalsy()
@@ -38,7 +38,7 @@ describe('Local Params', () => {
           slug: 'owner/repo',
         },
       },
-      environment: {},
+      envs: {},
     }
     const expected: IServiceParams = {
       branch: 'main',
@@ -63,7 +63,7 @@ describe('Local Params', () => {
           slug: 'owner/repo',
         },
       },
-      environment: {
+      envs: {
         GIT_COMMIT: 'testingsha',
         GIT_BRANCH: 'main'
       },
@@ -85,20 +85,20 @@ describe('Local Params', () => {
   it('returns errors on git command failures', async () => {
     const inputs: UploaderInputs = {
       args: { ...createEmptyArgs() },
-      environment: {},
+      envs: {},
     }
     const spawnSync = td.replace(childProcess, 'spawnSync')
     await expect(providerLocal.getServiceParams(inputs)).rejects.toThrow()
 
     td.when(spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { maxBuffer: SPAWNPROCESSBUFFERSIZE })).thenReturn(
       {
-        stdout: 'main',
+        stdout: Buffer.from('main'),
       },
     )
     await expect(providerLocal.getServiceParams(inputs)).rejects.toThrow()
 
     td.when(spawnSync('git', ['rev-parse', 'HEAD'], { maxBuffer: SPAWNPROCESSBUFFERSIZE })).thenReturn({
-      stdout: 'testSHA',
+      stdout: Buffer.from('testSHA'),
     })
     await expect(providerLocal.getServiceParams(inputs)).rejects.toThrow()
   })
@@ -106,7 +106,7 @@ describe('Local Params', () => {
   describe('getSlug()', () => {
     const inputs: UploaderInputs = {
       args: { ...createEmptyArgs() },
-      environment: {},
+      envs: {},
     }
 
     it('can get the slug from a git url', async () => {
@@ -114,15 +114,15 @@ describe('Local Params', () => {
       td.when(
         spawnSync('git', ['config', '--get', 'remote.origin.url'], { maxBuffer: SPAWNPROCESSBUFFERSIZE }),
       ).thenReturn({
-        stdout: 'git@github.com:testOrg/testRepo.git',
+        stdout: Buffer.from('git@github.com:testOrg/testRepo.git'),
       })
       td.when(
         spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { maxBuffer: SPAWNPROCESSBUFFERSIZE }),
       ).thenReturn({
-        stdout: 'main',
+        stdout: Buffer.from('main'),
       })
       td.when(spawnSync('git', ['rev-parse', 'HEAD'], { maxBuffer: SPAWNPROCESSBUFFERSIZE })).thenReturn({
-        stdout: 'testSHA',
+        stdout: Buffer.from('testSHA'),
       })
       const params = await providerLocal.getServiceParams(inputs)
       expect(params.slug).toBe(
@@ -135,15 +135,15 @@ describe('Local Params', () => {
       td.when(
         spawnSync('git', ['config', '--get', 'remote.origin.url'], { maxBuffer: SPAWNPROCESSBUFFERSIZE }),
       ).thenReturn({
-        stdout: 'notaurl',
+        stdout: Buffer.from('notaurl'),
       })
       td.when(
         spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { maxBuffer: SPAWNPROCESSBUFFERSIZE }),
       ).thenReturn({
-        stdout: 'main',
+        stdout: Buffer.from('main'),
       })
       td.when(spawnSync('git', ['rev-parse', 'HEAD'], { maxBuffer: SPAWNPROCESSBUFFERSIZE })).thenReturn({
-        stdout: 'testSHA',
+        stdout: Buffer.from('testSHA'),
       })
       await expect(providerLocal.getServiceParams(inputs)).rejects.toThrow()
     })
@@ -153,15 +153,15 @@ describe('Local Params', () => {
       td.when(
         spawnSync('git', ['config', '--get', 'remote.origin.url'], { maxBuffer: SPAWNPROCESSBUFFERSIZE }),
       ).thenReturn({
-        stdout: 'http://github.com/testOrg/testRepo.git',
+        stdout: Buffer.from('http://github.com/testOrg/testRepo.git'),
       })
       td.when(
         spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { maxBuffer: SPAWNPROCESSBUFFERSIZE }),
       ).thenReturn({
-        stdout: 'main',
+        stdout: Buffer.from('main'),
       })
       td.when(spawnSync('git', ['rev-parse', 'HEAD'], { maxBuffer: SPAWNPROCESSBUFFERSIZE })).thenReturn({
-        stdout: 'testSHA',
+        stdout: Buffer.from('testSHA'),
       })
       const params = await providerLocal.getServiceParams(inputs)
       expect(params.slug).toBe(

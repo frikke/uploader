@@ -83,6 +83,7 @@ function dryRun(
  * @param {boolean} args.clean Move discovered coverage reports to the trash
  * @param {string} args.feature Toggle features
  * @param {string} args.source Track wrappers of the uploader
+ * @param {string} args.useCwd Use current working directory as the automatically detected project root
  */
 export async function main(
   args: UploaderArgs,
@@ -113,7 +114,7 @@ export async function main(
   // TODO: clean and sanitize envs and args
   const envs = process.env
   // args
-  const inputs: UploaderInputs = { args, environment: envs }
+  const inputs: UploaderInputs = { args, envs }
 
   let uploadHost: string
   if (args.url) {
@@ -135,7 +136,7 @@ export async function main(
 
   // #endregion
   // #region == Step 2: detect if we are in a git repo
-  const projectRoot = args.rootDir || fetchGitRoot()
+  const projectRoot = args.rootDir || fetchGitRoot(args.useCwd || false)
   if (projectRoot === '') {
     info(
       '=> No git repo detected. Please use the -R flag if the below detected directory is not correct.',
@@ -223,6 +224,7 @@ export async function main(
 
     coverageFilePaths = requestedPaths
 
+
     if (!args.feature || args.feature.split(',').includes('search') === false) {
       info('Searching for coverage files...')
       const isNegated = (path: string) => path.startsWith('!')
@@ -237,6 +239,7 @@ export async function main(
             return coverageFilePaths.concat(coverageFilePatterns())
           }
         })(),
+        !args.preventSymbolicLinks,
       ))
 
       // Generate what the file listing would be after the blocklist is applied
@@ -418,6 +421,7 @@ export async function main(
       token,
       query,
       args.source || '',
+      envs,
       args,
     )
 
@@ -428,6 +432,7 @@ export async function main(
     const statusAndResultPair = await webHelpers.uploadToCodecovPUT(
       postResults,
       gzippedFile,
+      envs,
       args,
     )
     info(JSON.stringify(statusAndResultPair))

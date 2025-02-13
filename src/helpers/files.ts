@@ -197,6 +197,7 @@ const isNegated = (path: string) => path.startsWith('!')
 export async function getCoverageFiles(
   projectRoot: string,
   coverageFilePatterns: string[],
+  followSymbolicLinks: boolean = true,
 ): Promise<string[]> {
   const globstar = (pattern: string) => `**/${pattern}`
 
@@ -214,16 +215,17 @@ export async function getCoverageFiles(
   }), {
     cwd: projectRoot,
     dot: true,
+    followSymbolicLinks,
     ignore: getBlocklist(),
     suppressErrors: true,
   })
 }
 
-export function fetchGitRoot(): string {
-  const currentWorkingDirectory = process.cwd() 
+export function fetchGitRoot(useCwd: boolean): string {
+  const currentWorkingDirectory = process.cwd()
   try {
     const gitRoot = runExternalProgram('git', ['rev-parse', '--show-toplevel'])
-    return (gitRoot != "" ? gitRoot : currentWorkingDirectory)
+    return (gitRoot != "" && !useCwd ? gitRoot : currentWorkingDirectory)
   } catch (error) {
     info(`Error fetching git root. Defaulting to ${currentWorkingDirectory}. Please try using the -R flag. ${error}`)
     return currentWorkingDirectory
@@ -320,7 +322,8 @@ export function getFilePath(projectRoot: string, filePath: string): string {
     filePath.startsWith('./') ||
     filePath.startsWith('/') ||
     filePath.startsWith('.\\') ||
-    filePath.startsWith('.\\')
+    filePath.startsWith('.\\') ||
+    /^[A-Z]:\\\S*/.test(filePath) // This line is here to handle Windows drive letter absolute paths such as "C:\<path>"
   ) {
     return filePath
   }
@@ -347,7 +350,7 @@ export function getBlocklist(): string[] {
 }
 
 export function filterFilesAgainstBlockList(paths: string[], ignoreGlobs: string[]): string[] {
-  return micromatch.not(paths, ignoreGlobs, {windows: true})
+  return micromatch.not(paths, ignoreGlobs, { windows: true })
 }
 
 export function cleanCoverageFilePaths(projectRoot: string, paths: string[]): string[] {
